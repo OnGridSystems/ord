@@ -72,6 +72,7 @@ define_table! { STATISTIC_TO_COUNT, u64, u64 }
 define_table! { TRANSACTION_ID_TO_RUNE, &TxidValue, u128 }
 define_table! { TRANSACTION_ID_TO_TRANSACTION, &TxidValue, &[u8] }
 define_table! { WRITE_TRANSACTION_STARTING_BLOCK_COUNT_TO_TIMESTAMP, u32, u128 }
+define_table! { ADDRESS_TO_INSCRIPTION_IDS, &[u8], Vec<InscriptionIdValue> }
 
 #[derive(Copy, Clone)]
 pub(crate) enum Statistic {
@@ -90,6 +91,7 @@ pub(crate) enum Statistic {
   IndexTransactions = 12,
   IndexSpentSats = 13,
   InitialSyncTime = 14,
+  IndexAddresses = 15,
 }
 
 impl Statistic {
@@ -193,6 +195,7 @@ pub struct Index {
   index_sats: bool,
   index_spent_sats: bool,
   index_transactions: bool,
+  index_addresses: bool,
   settings: Settings,
   path: PathBuf,
   started: DateTime<Utc>,
@@ -315,6 +318,7 @@ impl Index {
         tx.open_table(SEQUENCE_NUMBER_TO_SATPOINT)?;
         tx.open_table(TRANSACTION_ID_TO_RUNE)?;
         tx.open_table(WRITE_TRANSACTION_STARTING_BLOCK_COUNT_TO_TIMESTAMP)?;
+        tx.open_table(ADDRESS_TO_INSCRIPTION_IDS)?;
 
         {
           let mut outpoint_to_sat_ranges = tx.open_table(OUTPOINT_TO_SAT_RANGES)?;
@@ -346,6 +350,12 @@ impl Index {
             &mut statistics,
             Statistic::IndexTransactions,
             u64::from(settings.index_transactions()),
+          )?;
+
+          Self::set_statistic(
+            &mut statistics,
+            Statistic::IndexAddresses,
+            u64::from(settings.index_addresses()),
           )?;
 
           Self::set_statistic(&mut statistics, Statistic::Schema, SCHEMA_VERSION)?;
@@ -406,6 +416,7 @@ impl Index {
     let index_sats;
     let index_spent_sats;
     let index_transactions;
+    let index_addresses;
 
     {
       let tx = database.begin_read()?;
@@ -414,6 +425,7 @@ impl Index {
       index_sats = Self::is_statistic_set(&statistics, Statistic::IndexSats)?;
       index_spent_sats = Self::is_statistic_set(&statistics, Statistic::IndexSpentSats)?;
       index_transactions = Self::is_statistic_set(&statistics, Statistic::IndexTransactions)?;
+      index_addresses = Self::is_statistic_set(&statistics, Statistic::IndexAddresses)?;
     }
 
     let genesis_block_coinbase_transaction =
@@ -432,6 +444,7 @@ impl Index {
       index_sats,
       index_spent_sats,
       index_transactions,
+      index_addresses,
       settings: settings.clone(),
       path,
       started: Utc::now(),
@@ -2075,6 +2088,24 @@ impl Index {
         }
       }
     }
+  }
+
+  pub(crate) fn get_inscription_ids_by_address(
+    &self,
+    address: Address,
+  ) -> Result<Vec<InscriptionId>> {
+    Ok(
+      self
+        .database
+        .begin_read()?
+        .open_table(ADDRESS_TO_INSCRIPTION_IDS)?
+        .get(address.to_string().as_bytes())?
+        .unwrap()
+        .value()
+        .iter()
+        .map(|entry| InscriptionId::load(*entry))
+        .collect(),
+    )
   }
 
   fn inscriptions_on_output<'a: 'tx, 'tx>(
