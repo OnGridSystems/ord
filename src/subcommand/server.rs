@@ -907,6 +907,7 @@ impl Server {
           inscriptions,
           address,
         }
+        .page(server_config)
         .into_response()
       })
     })
